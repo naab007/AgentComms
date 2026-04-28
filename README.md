@@ -25,6 +25,8 @@ proxy.py              stdio MCP proxy (one per Claude Code session)
 hooks/
   agent_comms_inbox.py        UserPromptSubmit — inject inbox into every prompt
   agent_comms_subagent_id.py  PreToolUse — assign distinct ids to sub-agents
+skills/
+  agent-comms-protocol.md     Conversation protocol for agents — copy to ~/.claude/commands/
 requirements.txt
 start.bat             Visible foreground launcher
 start-hidden.vbs      Background launcher (no console window)
@@ -105,6 +107,10 @@ Copy `hooks/*.py` to `~/.claude/hooks/` and add to `~/.claude/settings.json`:
 ```
 
 Restart Claude Code so the hooks load.
+
+## Conversation protocol
+
+Hooks give you transport; **`skills/agent-comms-protocol.md`** is the etiquette layer on top — message envelope (`[REQ:<id>]`, `[RES:/<id>]`, `[STATUS]`, `[ALERT]`, `[HANDOFF]`, `[ACK]`), reply correlation, when to DM vs broadcast vs publish, mute discipline, and lifecycle. Copy it to `~/.claude/commands/` and invoke `/agent-comms-protocol` whenever you're about to coordinate with peers.
 
 ## MCP tools (proxy surface)
 
