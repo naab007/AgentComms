@@ -467,7 +467,43 @@ async def get_agent_status(agent_id: Optional[str] = None) -> str:
     return await _call("get_agent_status", agent_id=_me(agent_id))
 
 
+def _eager_register() -> None:
+    """Register synchronously at proxy startup so the agent is alive in the
+    hub before the first tool call. Best-effort: hub down or any error →
+    log to stderr and fall through to lazy registration on first tool call.
+    Uses a synchronous httpx.Client because the asyncio event loop hasn't
+    started yet."""
+    global _session_id, _initialized, _registered, _last_register_ts
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            r = client.post(HUB_URL, json={
+                "jsonrpc": "2.0", "method": "initialize", "id": str(uuid.uuid4()),
+                "params": {"protocolVersion": "2025-11-25", "capabilities": {},
+                           "clientInfo": {"name": "AgentComms-proxy", "version": "1.2.0"}},
+            }, headers=_HDR)
+            sid = r.headers.get("mcp-session-id")
+            if not sid:
+                return
+            _session_id = sid
+            _initialized = True
+            client.post(HUB_URL, json={
+                "jsonrpc": "2.0", "method": "tools/call", "id": str(uuid.uuid4()),
+                "params": {"name": "register_agent", "arguments": {
+                    "agent_id": _agent_id, "project": _project_name,
+                    "description": f"auto-registered from {os.getcwd()}",
+                }},
+            }, headers={**_HDR, "Mcp-Session-Id": sid})
+            _registered = True
+            _last_register_ts = time.time()
+            print(f"AgentComms eager-register OK: {_agent_id}",
+                  file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"AgentComms eager-register failed (will retry lazily): {e}",
+              file=sys.stderr, flush=True)
+
+
 if __name__ == "__main__":
     print(f"AgentComms proxy starting — agent_id={_agent_id} project={_project_name}",
           file=sys.stderr, flush=True)
+    _eager_register()
     mcp.run(transport="stdio")
