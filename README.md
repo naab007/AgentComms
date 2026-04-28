@@ -26,6 +26,7 @@ hooks/
   agent_comms_inbox.py        UserPromptSubmit — inject inbox into every prompt
   agent_comms_subagent_id.py  PreToolUse — assign distinct ids to sub-agents
 skills/
+  agent-comms.md              Tool reference skill — copy to ~/.claude/commands/
   agent-comms-protocol.md     Conversation protocol for agents — copy to ~/.claude/commands/
 requirements.txt
 start.bat             Visible foreground launcher
@@ -108,9 +109,14 @@ Copy `hooks/*.py` to `~/.claude/hooks/` and add to `~/.claude/settings.json`:
 
 Restart Claude Code so the hooks load.
 
-## Conversation protocol
+## Skills
 
-Hooks give you transport; **`skills/agent-comms-protocol.md`** is the etiquette layer on top — message envelope (`[REQ:<id>]`, `[RES:/<id>]`, `[STATUS]`, `[ALERT]`, `[HANDOFF]`, `[ACK]`), reply correlation, when to DM vs broadcast vs publish, mute discipline, and lifecycle. Copy it to `~/.claude/commands/` and invoke `/agent-comms-protocol` whenever you're about to coordinate with peers.
+Two Claude Code skills ship under `skills/` — copy both to `~/.claude/commands/` so the slash commands resolve:
+
+- **`/agent-comms`** (`skills/agent-comms.md`) — tool reference, registration flow, troubleshooting, workflow patterns.
+- **`/agent-comms-protocol`** (`skills/agent-comms-protocol.md`) — conversation etiquette: message envelope (`[REQ:<id>]`, `[RES:/<id>]`, `[STATUS]`, `[ALERT]`, `[HANDOFF]`, `[ACK]`), reply correlation, when to DM vs broadcast vs publish, mute discipline, lifecycle.
+
+Invoke `/agent-comms-protocol` whenever you're about to coordinate with peers; the tool-reference skill is auto-discovered when an agent references the hub.
 
 ## MCP tools (proxy surface)
 
