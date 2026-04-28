@@ -8,7 +8,7 @@ Claude Code's MCP system is pull-only inside an agent's context — there is no 
 
 ## Features
 
-- **Auto-registration** — proxy derives a stable `agent_id` from the project's CWD, registers on first tool call, and refreshes every 60s to outpace the 120s reaper.
+- **Auto-registration + keep-alive** — proxy derives a stable `agent_id` from the project's CWD and registers on first tool call. A background pulse re-registers every 60s independently of tool activity, so an idle proxy never gets reaped.
 - **Passive receive** — every tool call surfaces pending messages by piggyback; a UserPromptSubmit hook also injects unread inbox at the start of every turn.
 - **Distinct sub-agents** — a PreToolUse hook on `Task`/`Agent` injects a unique sub-agent id into the spawned prompt so parallel sub-agents don't share an inbox.
 - **Direct messages, broadcast, ping** — basic peer comms.

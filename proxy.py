@@ -49,6 +49,7 @@ _session_id: Optional[str] = None
 _registered: bool = False
 _initialized: bool = False
 _last_register_ts: float = 0.0
+_keepalive_task: Optional[asyncio.Task] = None
 # Refresh registration well before the hub's 120s TTL so the reaper never
 # evicts us between tool calls. The hub register_agent is idempotent — calling
 # it on an already-registered agent just heartbeats.
@@ -124,10 +125,13 @@ async def _ensure_session() -> None:
 async def _ensure_registered() -> None:
     """Register the auto-derived agent_id with the hub. Safe to call repeatedly.
     Re-registers every REGISTER_REFRESH_S seconds (60s) to outpace the hub's
-    120s TTL reaper, so an idle proxy is never silently de-registered."""
+    120s TTL reaper, so an idle proxy is never silently de-registered. Also
+    starts the background keep-alive task on first call so the agent stays
+    registered even when no tool calls happen for long stretches."""
     global _registered, _last_register_ts
     now = time.time()
     if _registered and (now - _last_register_ts) < REGISTER_REFRESH_S:
+        _start_keepalive()
         return
     await _ensure_session()
     await _hub("tools/call", params={
@@ -140,6 +144,55 @@ async def _ensure_registered() -> None:
     })
     _registered = True
     _last_register_ts = now
+    _start_keepalive()
+
+
+def _start_keepalive() -> None:
+    """Start the background keep-alive task if it isn't already running.
+    Idempotent — safe to call from every _ensure_registered. Must be called
+    from inside the asyncio event loop (_ensure_registered always is)."""
+    global _keepalive_task
+    if _keepalive_task is not None and not _keepalive_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _keepalive_task = loop.create_task(_keepalive_loop(),
+                                       name="agent-comms-keepalive")
+
+
+async def _keepalive_loop() -> None:
+    """Background pulse: re-register every REGISTER_REFRESH_S seconds so an
+    idle proxy with no tool calls in flight still survives the hub's reaper.
+
+    Self-healing: a hub restart or session expiry surfaces as a RuntimeError
+    from _hub; we _reset_session() and the NEXT iteration re-establishes both
+    the MCP session and the agent registration. Connection errors (hub fully
+    down) are tolerated quietly — we just retry on the next tick."""
+    global _last_register_ts
+    while True:
+        try:
+            await asyncio.sleep(REGISTER_REFRESH_S)
+            await _ensure_session()
+            await _hub("tools/call", params={
+                "name": "register_agent",
+                "arguments": {
+                    "agent_id": _agent_id,
+                    "project": _project_name,
+                    "description": f"auto-registered from {os.getcwd()}",
+                },
+            })
+            _last_register_ts = time.time()
+        except asyncio.CancelledError:
+            break
+        except RuntimeError as e:
+            if _is_session_error(str(e)):
+                _reset_session()
+            # else: hub returned a tool-level error — log nothing, retry next tick
+        except (httpx.ConnectError, httpx.ReadError, httpx.WriteError, OSError):
+            # Hub is down. Forget the session so we re-init when it comes back.
+            _reset_session()
 
 
 def _format_pending(messages: list) -> str:
