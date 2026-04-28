@@ -223,6 +223,8 @@ async def heartbeat(agent_id: str) -> str:
     Call this periodically during long-running work to avoid being reaped.
     The TTL resets on every tool call, so this is only needed when you're
     not calling other tools for more than ~{ttl}s.
+    Logged as a `keep_alive` event so the dashboard distinguishes routine
+    pulses from real registrations.
     """.format(ttl=AGENT_TTL_SECONDS)
     async with _lock:
         if agent_id not in _agents:
@@ -230,6 +232,7 @@ async def heartbeat(agent_id: str) -> str:
                                "message": f"Agent '{agent_id}' not registered — call register_agent first"})
         _agents[agent_id]["last_seen"] = _now()
 
+    await _log_event("keep_alive", {"agent_id": agent_id})
     return json.dumps({"status": "ok", "agent_id": agent_id,
                        "ttl_seconds": AGENT_TTL_SECONDS, "timestamp": _now()})
 
@@ -809,6 +812,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .ev-subscribe   { background: #1f3d3d; color: #39d3f0; }
   .ev-unsubscribe { background: #2a2a1f; color: #e3b341; }
   .ev-channel_publish { background: #2a1f3d; color: #bc8cff; }
+  .ev-keep_alive  { background: #1c2128; color: #6e7681; }
   .ev-heartbeat   { background: #1c2128; color: #484f58; }
   .ev-text { color: #c9d1d9; }
   .empty { color: #484f58; font-style: italic; padding: 20px 16px; text-align: center; }
@@ -892,6 +896,7 @@ function eventText(e) {
     case 'subscribe':       return `${e.subscriber} subscribed to ${e.channel}`;
     case 'unsubscribe':     return `${e.subscriber} left ${e.channel}`;
     case 'channel_publish': return `${e.from} published${e.topic ? ' ['+e.topic+']' : ''} → ${(e.subscribers||[]).length} subs`;
+    case 'keep_alive':      return `${e.agent_id} keep-alive`;
     case 'heartbeat':       return 'heartbeat';
     default:                return JSON.stringify(e);
   }

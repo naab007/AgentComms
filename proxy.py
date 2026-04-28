@@ -163,26 +163,46 @@ def _start_keepalive() -> None:
 
 
 async def _keepalive_loop() -> None:
-    """Background pulse: re-register every REGISTER_REFRESH_S seconds so an
-    idle proxy with no tool calls in flight still survives the hub's reaper.
+    """Background pulse: send a heartbeat every REGISTER_REFRESH_S seconds so
+    an idle proxy with no tool calls in flight still survives the hub's reaper.
 
-    Self-healing: a hub restart or session expiry surfaces as a RuntimeError
-    from _hub; we _reset_session() and the NEXT iteration re-establishes both
-    the MCP session and the agent registration. Connection errors (hub fully
-    down) are tolerated quietly — we just retry on the next tick."""
+    The heartbeat tool is cheaper than register_agent and the hub logs it as
+    a `keep_alive` event so the dashboard distinguishes routine pulses from
+    actual registrations. If heartbeat returns a tool-level "not registered"
+    error (the hub was restarted or somehow lost us), fall back to a full
+    register_agent in the same tick.
+
+    Self-healing: hub restart or session expiry surfaces as a RuntimeError
+    from _hub; we _reset_session() and the next iteration re-establishes
+    both the MCP session and the agent registration."""
     global _last_register_ts
     while True:
         try:
             await asyncio.sleep(REGISTER_REFRESH_S)
             await _ensure_session()
-            await _hub("tools/call", params={
-                "name": "register_agent",
-                "arguments": {
-                    "agent_id": _agent_id,
-                    "project": _project_name,
-                    "description": f"auto-registered from {os.getcwd()}",
-                },
+            result = await _hub("tools/call", params={
+                "name": "heartbeat",
+                "arguments": {"agent_id": _agent_id},
             })
+            need_reregister = False
+            for c in result.get("content", []):
+                if c.get("type") != "text":
+                    continue
+                try:
+                    data = json.loads(c.get("text", ""))
+                    if data.get("status") == "error":
+                        need_reregister = True
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if need_reregister:
+                await _hub("tools/call", params={
+                    "name": "register_agent",
+                    "arguments": {
+                        "agent_id": _agent_id,
+                        "project": _project_name,
+                        "description": f"auto-registered from {os.getcwd()}",
+                    },
+                })
             _last_register_ts = time.time()
         except asyncio.CancelledError:
             break
